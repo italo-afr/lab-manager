@@ -10,11 +10,11 @@ O **LabManager** é um sistema web desenvolvido para modernizar e organizar a ge
 
 | Dashboard Financeiro | Gestão de Pedidos |
 |:--------------------:|:-----------------:|
-| *Cole aqui o print do Dashboard* | *Cole aqui o print da Lista* |
+| |
 
 | Cadastro de Parceiros | Edição de Dentista |
 |:---------------------:|:------------------:|
-| *Cole aqui o print do Form* | *Cole aqui o print da Edição* |
+| |
 
 ---
 
