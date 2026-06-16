@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { db } from '../services/firebase';
-import { collection, query, onSnapshot, orderBy, deleteDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, orderBy, deleteDoc, doc, updateDoc, addDoc, serverTimestamp, getDocs } from 'firebase/firestore';
 import { jsPDF } from "jspdf";
+import { ETAPAS, resolverEtapa, indiceEtapa } from '../config/etapas';
+import { DetalheOS } from './DetalheOS';
 
 interface Props {
     aoClicarEditar: (ordem: any) => void;
     filtro: 'ativos' | 'concluidos';
+    mostrarFinanceiro?: boolean;
 }
 
 interface Ordem {
@@ -15,22 +19,32 @@ interface Ordem {
   tipo_servico: string;
   data_entrega_prevista: string | any; 
   status: string;
+  etapa?: string;
   observacoes?: string;
+  telefone_dentista?: string;
   valor?: number;
   pago?: boolean;
 }
 
-export function ListaOrdens({ aoClicarEditar, filtro }: Props) {
+export function ListaOrdens({ aoClicarEditar, filtro, mostrarFinanceiro = true }: Props) {
   const [ordens, setOrdens] = useState<Ordem[]>([]);
   const [busca, setBusca] = useState('');
   const [carregandoDados, setCarregandoDados] = useState(true);
+  const [modalConfirmar, setModalConfirmar] = useState<Ordem | null>(null);
+  const [salvando, setSalvando] = useState(false);
+  const [ordemDetalhe, setOrdemDetalhe] = useState<Ordem | null>(null);
 
   useEffect(() => {
+    // Busca telefones dos dentistas uma vez para cruzar com as ordens
+    let telefonesPorNome: Record<string, string> = {};
+    getDentistas().then(t => { telefonesPorNome = t; });
+
     const q = query(collection(db, "ordens_servico"), orderBy("data_entrega_prevista", "asc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const dados = snapshot.docs.map(doc => ({
         id: doc.id,
-        ...doc.data()
+        ...doc.data(),
+        telefone_dentista: telefonesPorNome[(doc.data() as any).dentista_nome] || ''
       })) as Ordem[];
       setOrdens(dados);
       setCarregandoDados(false);
@@ -38,14 +52,70 @@ export function ListaOrdens({ aoClicarEditar, filtro }: Props) {
     return () => unsubscribe();
   }, []);
 
+  async function getDentistas(): Promise<Record<string, string>> {
+    const snap = await getDocs(query(collection(db, "dentistas")));
+    const map: Record<string, string> = {};
+    snap.docs.forEach(d => { map[d.data().nome] = d.data().telefone || ''; });
+    return map;
+  }
+
   async function excluirOrdem(id: string) {
     if (confirm("Tem certeza que deseja apagar este pedido?")) {
       await deleteDoc(doc(db, "ordens_servico", id));
     }
   }
 
-  async function concluirOrdem(id: string) {
-    await updateDoc(doc(db, "ordens_servico", id), { status: 'pronto' });
+  async function registrarHistorico(ordemId: string, descricao: string, etapaId?: string) {
+    await addDoc(collection(db, "ordens_servico", ordemId, "historico"), {
+      tipo: 'etapa',
+      descricao,
+      etapaId: etapaId || null,
+      criadoEm: serverTimestamp(),
+    });
+  }
+
+  async function avancarEtapa(ordem: Ordem) {
+    const atual = resolverEtapa(ordem);
+    const idx = indiceEtapa(atual.id);
+    if (idx >= ETAPAS.length - 1) return;
+    const proxima = ETAPAS[idx + 1];
+    const ehFinal = idx + 1 === ETAPAS.length - 1;
+
+    if (ehFinal) {
+      setModalConfirmar(ordem);
+      return;
+    }
+
+    await updateDoc(doc(db, "ordens_servico", ordem.id), {
+      etapa: proxima.id,
+      status: 'em_producao',
+    });
+    await registrarHistorico(ordem.id, `Avançou para ${proxima.nome}`, proxima.id);
+  }
+
+  async function confirmarPronto() {
+    if (!modalConfirmar) return;
+    setSalvando(true);
+    const proxima = ETAPAS[ETAPAS.length - 1];
+    await updateDoc(doc(db, "ordens_servico", modalConfirmar.id), {
+      etapa: proxima.id,
+      status: 'pronto',
+    });
+    await registrarHistorico(modalConfirmar.id, `Marcado como ${proxima.nome}`, proxima.id);
+    setSalvando(false);
+    setModalConfirmar(null);
+  }
+
+  async function voltarEtapa(ordem: Ordem) {
+    const atual = resolverEtapa(ordem);
+    const idx = indiceEtapa(atual.id);
+    if (idx <= 0) return;
+    const anterior = ETAPAS[idx - 1];
+    await updateDoc(doc(db, "ordens_servico", ordem.id), {
+      etapa: anterior.id,
+      status: 'em_producao',
+    });
+    await registrarHistorico(ordem.id, `Voltou para ${anterior.nome}`, anterior.id);
   }
 
   function formatarData(data: any) {
@@ -81,6 +151,16 @@ export function ListaOrdens({ aoClicarEditar, filtro }: Props) {
 
     // 4. Abrir em nova aba
     window.open(linkGoogle, '_blank');
+  }
+
+  function abrirWhatsApp(ordem: Ordem & { telefone_dentista?: string }) {
+    const telefone = ordem.telefone_dentista || '';
+    // Remove tudo que não é número e adiciona código do Brasil
+    const numero = '55' + telefone.replace(/\D/g, '');
+    const mensagem = encodeURIComponent(
+      `Olá Dr(a). ${ordem.dentista_nome}, a prótese do paciente *${ordem.nome_paciente}* (${ordem.tipo_servico}) está pronta para retirada.\n\nAtt, Laboratório.`
+    );
+    window.open(`https://wa.me/${numero}?text=${mensagem}`, '_blank');
   }
 
   function imprimirEtiqueta(ordem: Ordem) {
@@ -129,7 +209,8 @@ export function ListaOrdens({ aoClicarEditar, filtro }: Props) {
   return (
     <div className="w-full space-y-8 animate-fade-in">
       
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className={`grid grid-cols-1 gap-6 ${mostrarFinanceiro ? 'md:grid-cols-3' : 'md:grid-cols-1'}`}>
+         {mostrarFinanceiro && (
          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between h-28 relative overflow-hidden">
             <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider z-10">Caixa (Já Recebido)</span>
             <div className="flex items-end justify-between z-10">
@@ -139,7 +220,9 @@ export function ListaOrdens({ aoClicarEditar, filtro }: Props) {
                 </span>
             </div>
         </div>
+        )}
 
+        {mostrarFinanceiro && (
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between h-28">
             <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">A Receber (Pendente)</span>
             <div className="flex items-end justify-between">
@@ -149,6 +232,7 @@ export function ListaOrdens({ aoClicarEditar, filtro }: Props) {
                 </span>
             </div>
         </div>
+        )}
 
         <div className={`p-5 rounded-xl border shadow-sm flex flex-col justify-between h-28 ${totalAtrasados > 0 ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200'}`}>
             <span className={`text-xs font-semibold uppercase tracking-wider ${totalAtrasados > 0 ? 'text-red-600' : 'text-slate-500'}`}>
@@ -183,81 +267,101 @@ export function ListaOrdens({ aoClicarEditar, filtro }: Props) {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
             {ordensFiltradas.map((ordem) => {
                 const isLate = ordem.status !== 'pronto' && ordem.data_entrega_prevista < hoje;
+                const etapaAtual = resolverEtapa(ordem);
+                const idxEtapa = indiceEtapa(etapaAtual.id);
+                const podeAvancar = idxEtapa < ETAPAS.length - 1;
+                const podeVoltar = idxEtapa > 0;
                 
                 return (
                     <div key={ordem.id} className={`
-                        group p-5 rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md flex flex-col justify-between bg-white
-                        ${ordem.status === 'pronto' ? 'border-emerald-100 bg-emerald-50/30' : ''}
-                        ${isLate ? 'border-red-300 ring-1 ring-red-100' : 'border-slate-200'}
+                        rounded-xl border shadow-sm transition-all duration-200 hover:shadow-md flex flex-col bg-white overflow-hidden
+                        ${isLate ? 'border-red-200' : ordem.status === 'pronto' ? 'border-emerald-200' : 'border-slate-200'}
                     `}>
-                        <div>
-                            <div className="flex justify-between items-start mb-3">
-                                <div>
-                                    <h3 className="text-base font-bold text-slate-900 leading-tight line-clamp-1">{ordem.nome_paciente}</h3>
-                                    <p className="text-sm text-slate-500 mt-0.5 line-clamp-1">Dr(a). {ordem.dentista_nome}</p>
-                                </div>
-                                <div className="flex flex-col items-end gap-1">
-                                    <span className={`inline-flex items-center px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide ${ordem.status === 'pronto' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-50 text-blue-700 border border-blue-100'}`}>
-                                        {ordem.status === 'pronto' ? 'Pronto' : 'Produção'}
-                                    </span>
-                                    {isLate && (
-                                        <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded border border-red-200 animate-pulse">
-                                            ATRASADO
-                                        </span>
-                                    )}
-                                </div>
+                        {/* Topo colorido com etapa */}
+                        <div className={`px-4 py-2 flex items-center justify-between ${isLate ? 'bg-red-50' : ordem.status === 'pronto' ? 'bg-emerald-50' : 'bg-slate-50'} border-b ${isLate ? 'border-red-100' : 'border-slate-100'}`}>
+                            <div className="flex items-center gap-2">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide border ${etapaAtual.cor}`}>
+                                    {etapaAtual.nome}
+                                </span>
+                                <span className="text-[10px] text-slate-400 font-medium">{idxEtapa + 1}/{ETAPAS.length}</span>
                             </div>
-                            
-                            <div className="mb-4 flex justify-between items-center">
-                                <span className="inline-block px-2 py-1 text-xs font-medium text-slate-600 bg-slate-100 rounded border border-slate-200">{ordem.tipo_servico}</span>
-                                <div className="text-right">
-                                    <span className="block text-sm font-semibold text-slate-700">{formatarMoeda(ordem.valor)}</span>
-                                    <span className={`text-[10px] font-bold ${ordem.pago ? 'text-emerald-600' : 'text-slate-400'}`}>
-                                        {ordem.pago ? 'PAGO' : 'A RECEBER'}
-                                    </span>
-                                </div>
-                            </div>
+                            {isLate && (
+                                <span className="bg-red-100 text-red-600 text-[10px] font-bold px-2 py-0.5 rounded-full border border-red-200 animate-pulse">
+                                    ATRASADO
+                                </span>
+                            )}
                         </div>
 
-                        <div className="flex items-center justify-between pt-4 border-t border-slate-100 mt-2">
-                            <div className="flex flex-col">
-                                <span className="text-[10px] font-semibold text-slate-400 uppercase">Entrega</span>
-                                <span className={`text-sm font-mono font-medium ${isLate ? 'text-red-600 font-bold' : 'text-slate-700'}`}>
+                        {/* Corpo */}
+                        <div className="p-4 flex flex-col gap-3 flex-1">
+
+                            {/* Paciente e dentista */}
+                            <div>
+                                <h3 onClick={() => setOrdemDetalhe(ordem)} className="text-base font-bold text-slate-900 leading-tight cursor-pointer hover:text-blue-600 transition-colors flex items-center gap-1 group/name" title="Ver detalhes">
+                                    {ordem.nome_paciente}
+                                    <svg className="w-3 h-3 text-slate-300 group-hover/name:text-blue-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                </h3>
+                                <p className="text-xs text-slate-500 mt-0.5">Dr(a). {ordem.dentista_nome}</p>
+                            </div>
+
+                            {/* Serviço + valor separados */}
+                            <div className="flex items-center justify-between">
+                                <span className="inline-block px-2 py-1 text-xs font-medium text-slate-600 bg-slate-100 rounded-md border border-slate-200">{ordem.tipo_servico}</span>
+                            </div>
+
+                            {/* Valor em destaque (somente dono) */}
+                            {mostrarFinanceiro && (
+                            <div className={`rounded-lg px-3 py-2 flex items-center justify-between ${ordem.pago ? 'bg-emerald-50 border border-emerald-100' : 'bg-slate-50 border border-slate-200'}`}>
+                                <span className="text-xs font-semibold text-slate-500">{ordem.pago ? '✓ Pago' : 'A receber'}</span>
+                                <span className={`text-base font-bold ${ordem.pago ? 'text-emerald-600' : 'text-slate-800'}`}>{formatarMoeda(ordem.valor)}</span>
+                            </div>
+                            )}
+                        </div>
+
+                        {/* Rodapé: entrega + ações */}
+                        <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between">
+                            <div>
+                                <span className="text-[10px] font-semibold text-slate-400 uppercase block">Entrega</span>
+                                <span className={`text-sm font-mono font-semibold ${isLate ? 'text-red-600' : 'text-slate-700'}`}>
                                     {formatarData(ordem.data_entrega_prevista)}
                                 </span>
                             </div>
-
-                            <div className="flex items-center gap-1.5">
-                                {/* BOTÃO GOOGLE AGENDA (NOVO) */}
-                                <button 
-                                    onClick={() => adicionarAoAgenda(ordem)} 
-                                    className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" 
-                                    title="Adicionar ao Google Agenda"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                                        <path fillRule="evenodd" d="M5.75 2a.75.75 0 01.75.75V4h7V2.75a.75.75 0 011.5 0V4h.25A2.75 2.75 0 0118 6.75v8.5A2.75 2.75 0 0115.25 18H4.75A2.75 2.75 0 012 15.25v-8.5A2.75 2.75 0 014.75 4h.25V2.75A.75.75 0 015.75 2zm-1 5.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h10.5c.69 0 1.25-.56 1.25-1.25v-6.5c0-.69-.56-1.25-1.25-1.25H4.75z" clipRule="evenodd" />
-                                    </svg>
+                            <div className="flex items-center gap-0.5">
+                                <button onClick={() => adicionarAoAgenda(ordem)} className="p-1.5 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors" title="Google Agenda">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="M5.75 2a.75.75 0 01.75.75V4h7V2.75a.75.75 0 011.5 0V4h.25A2.75 2.75 0 0118 6.75v8.5A2.75 2.75 0 0115.25 18H4.75A2.75 2.75 0 012 15.25v-8.5A2.75 2.75 0 014.75 4h.25V2.75A.75.75 0 015.75 2zm-1 5.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h10.5c.69 0 1.25-.56 1.25-1.25v-6.5c0-.69-.56-1.25-1.25-1.25H4.75z" clipRule="evenodd" /></svg>
                                 </button>
-
-                                <button onClick={() => aoClicarEditar(ordem)} className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors" title="Editar">
+                                <button onClick={() => abrirWhatsApp(ordem)} className="p-1.5 text-slate-300 hover:text-emerald-500 hover:bg-emerald-50 rounded-lg transition-colors" title="WhatsApp">
+                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                                </button>
+                                <button onClick={() => aoClicarEditar(ordem)} className="p-1.5 text-slate-300 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition-colors" title="Editar">
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                 </button>
-                                
-                                <button onClick={() => imprimirEtiqueta(ordem)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Imprimir">
+                                <button onClick={() => imprimirEtiqueta(ordem)} className="p-1.5 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors" title="Imprimir">
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
                                 </button>
-                                
-                                <button onClick={() => excluirOrdem(ordem.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Excluir">
+                                <button onClick={() => excluirOrdem(ordem.id)} className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Excluir">
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                 </button>
+                            </div>
+                        </div>
 
-                                {ordem.status !== 'pronto' && (
-                                    <button onClick={() => concluirOrdem(ordem.id)} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg shadow-sm transition-all active:scale-95">
-                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                        {/* Navegação de etapa */}
+                        {(podeVoltar || podeAvancar) && (
+                            <div className="flex gap-2 px-4 pb-4">
+                                {podeVoltar ? (
+                                    <button onClick={() => voltarEtapa(ordem)} className="flex items-center gap-1 px-3 py-2 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors w-full justify-center">
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+                                        Voltar
+                                    </button>
+                                ) : <div className="w-full" />}
+                                {podeAvancar && (
+                                    <button onClick={() => avancarEtapa(ordem)} className="flex items-center gap-1 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg transition-all active:scale-95 w-full justify-center shadow-sm">
+                                        Avançar
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
                                     </button>
                                 )}
                             </div>
-                        </div>
+                        )}
                     </div>
                 );
             })}
@@ -267,6 +371,66 @@ export function ListaOrdens({ aoClicarEditar, filtro }: Props) {
             <div className="text-center py-12 text-slate-500">Nada encontrado.</div>
         )}
       </div>
+
+      {/* DETALHE DA ORDEM */}
+      {ordemDetalhe && (
+        <DetalheOS ordem={ordemDetalhe} aoFechar={() => setOrdemDetalhe(null)} mostrarFinanceiro={mostrarFinanceiro} />
+      )}
+
+      {/* MODAL: renderizado via Portal direto no body, fora de qualquer div pai */}
+      {modalConfirmar && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+          {/* Backdrop */}
+          <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setModalConfirmar(null)} />
+
+          {/* Card */}
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            {/* Ícone */}
+            <div className="flex items-center justify-center w-14 h-14 rounded-full bg-emerald-100 mx-auto mb-4">
+              <svg className="w-7 h-7 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+
+            <h3 className="text-lg font-bold text-slate-900 text-center mb-1">Marcar como Pronto?</h3>
+            <p className="text-sm text-slate-500 text-center mb-5">O pedido será movido para o Histórico de Entregas.</p>
+
+            {/* Resumo do pedido */}
+            <div className="bg-slate-50 rounded-xl p-4 mb-6 space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">Paciente</span>
+                <span className="font-semibold text-slate-900">{modalConfirmar.nome_paciente}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">Dentista</span>
+                <span className="font-semibold text-slate-900">{modalConfirmar.dentista_nome}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">Serviço</span>
+                <span className="font-semibold text-slate-900">{modalConfirmar.tipo_servico}</span>
+              </div>
+            </div>
+
+            {/* Botões */}
+            <div className="flex gap-3">
+              <button
+                onClick={() => setModalConfirmar(null)}
+                className="flex-1 px-4 py-2.5 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmarPronto}
+                disabled={salvando}
+                className="flex-1 px-4 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-sm disabled:opacity-60"
+              >
+                {salvando ? 'Salvando...' : 'Confirmar ✓'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
-}   
+}

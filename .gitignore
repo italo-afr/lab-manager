@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+git filter-branch --force --index-filter \
+"git rm --cached --ignore-unmatch src/services/firebase.ts" \
+--prune-empty --tag-name-filter cat -- --all
