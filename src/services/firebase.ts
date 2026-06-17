@@ -8,7 +8,12 @@ import { getAuth } from "firebase/auth";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
-//
+  apiKey: "AIzaSyA8Ih8PcY2vc9Ji_vsTW9RLaYd24J1l3zA",
+  authDomain: "labmanager-82b2d.firebaseapp.com",
+  projectId: "labmanager-82b2d",
+  storageBucket: "labmanager-82b2d.firebasestorage.app",
+  messagingSenderId: "821025419194",
+  appId: "1:821025419194:web:9d60c447ff899c85af3783"
 };
 
 // Initialize Firebase
