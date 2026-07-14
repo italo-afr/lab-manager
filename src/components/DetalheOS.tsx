@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { db } from '../services/firebase';
-import { collection, query, orderBy, onSnapshot, Timestamp, addDoc, serverTimestamp, deleteDoc, doc } from 'firebase/firestore';
+import { db, auth } from '../services/firebase';
+import { collection, query, orderBy, onSnapshot, Timestamp, addDoc, serverTimestamp, deleteDoc, doc, getDoc } from 'firebase/firestore';
 import { ETAPAS } from '../config/etapas';
 import { enviarFoto, excluirFoto } from '../services/supabase';
 import imageCompression from 'browser-image-compression';
@@ -30,6 +30,7 @@ interface Evento {
   descricao: string;
   etapaId?: string;
   fotoUrl?: string;
+  autor?: string;
   criadoEm: Timestamp;
 }
 
@@ -38,7 +39,21 @@ export function DetalheOS({ ordem, aoFechar, mostrarFinanceiro = true }: Props) 
   const [carregando, setCarregando] = useState(true);
   const [enviando, setEnviando] = useState(false);
   const [fotoAmpliada, setFotoAmpliada] = useState<string | null>(null);
+  const [nomeUsuarioAtual, setNomeUsuarioAtual] = useState<string>('');
   const inputFotoRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    getDoc(doc(db, "usuarios", uid)).then(snap => {
+      if (snap.exists()) {
+        const dados = snap.data();
+        setNomeUsuarioAtual(dados.nome || dados.email || auth.currentUser?.email || 'Usuário');
+      } else {
+        setNomeUsuarioAtual(auth.currentUser?.email || 'Usuário');
+      }
+    });
+  }, []);
 
   useEffect(() => {
     const q = query(
@@ -88,6 +103,7 @@ export function DetalheOS({ ordem, aoFechar, mostrarFinanceiro = true }: Props) 
         tipo: 'foto',
         descricao: 'Foto adicionada',
         fotoUrl: url,
+        autor: nomeUsuarioAtual || null,
         criadoEm: serverTimestamp(),
       });
     } catch (err) {
@@ -277,7 +293,10 @@ export function DetalheOS({ ordem, aoFechar, mostrarFinanceiro = true }: Props) 
                             </span>
                           )}
                         </div>
-                        <p className="text-xs text-slate-400 mt-0.5">{formatarTimestamp(evento.criadoEm)}</p>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          {formatarTimestamp(evento.criadoEm)}
+                          {evento.autor && <span> · {evento.autor}</span>}
+                        </p>
 
                         {evento.tipo === 'foto' && evento.fotoUrl && (
                           <div className="relative mt-2 inline-block group">

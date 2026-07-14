@@ -149,24 +149,13 @@ export function FormularioOS({ pedidoEdicao, aoCancelar }: Props) {
 
   return (
     <div className="p-6">
-      <div className="mb-6 flex justify-between items-start">
-        <div>
+      <div className="mb-6">
             <h2 className={`text-lg font-semibold flex items-center gap-2 ${pedidoEdicao ? 'text-amber-700' : 'text-slate-900'}`}>
                 {pedidoEdicao ? (<><span>✏️</span> Editando Ordem</>) : ('Nova Ordem')}
             </h2>
             <p className="text-sm text-slate-500 mt-1">
                 {pedidoEdicao ? 'Ajuste os dados abaixo.' : 'Preencha os dados do serviço.'}
             </p>
-        </div>
-
-        {pedidoEdicao && (
-            <button onClick={aoCancelar} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-md hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-all shadow-sm">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                    <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-                </svg>
-                Cancelar
-            </button>
-        )}
       </div>
 
       <form onSubmit={salvarOrdem} className="space-y-5">

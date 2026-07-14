@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { db } from '../services/firebase';
 import { collection, addDoc, query, onSnapshot, orderBy, deleteDoc, doc, updateDoc, getDocs } from 'firebase/firestore';
 
@@ -24,6 +25,7 @@ export function ListaServicos() {
   const [servicos, setServicos] = useState<Servico[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [verificouSeed, setVerificouSeed] = useState(false);
+  const [modalAberto, setModalAberto] = useState(false);
 
   const [nome, setNome] = useState('');
   const [prazo, setPrazo] = useState('');
@@ -63,11 +65,22 @@ export function ListaServicos() {
     setIdEdicao(null);
   }
 
+  function abrirNovoServico() {
+    limpar();
+    setModalAberto(true);
+  }
+
   function iniciarEdicao(s: Servico) {
     setNome(s.nome);
     setPrazo(s.prazoPadraoDias.toString());
     setValor(s.valorPadrao ? s.valorPadrao.toString() : '');
     setIdEdicao(s.id);
+    setModalAberto(true);
+  }
+
+  function fecharModal() {
+    setModalAberto(false);
+    limpar();
   }
 
   async function salvar(e: React.FormEvent) {
@@ -85,7 +98,7 @@ export function ListaServicos() {
       } else {
         await addDoc(collection(db, "servicos"), dados);
       }
-      limpar();
+      fecharModal();
     } catch (err) {
       console.error(err);
       alert("Erro ao salvar serviço.");
@@ -106,46 +119,19 @@ export function ListaServicos() {
   return (
     <div className="max-w-3xl mx-auto space-y-8">
 
-      <div className={`p-6 rounded-xl border shadow-sm ${idEdicao ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}>
-        <div className="flex justify-between items-start mb-5">
-          <div>
-            <h2 className={`text-lg font-semibold ${idEdicao ? 'text-amber-700' : 'text-slate-900'}`}>
-              {idEdicao ? '✏️ Editar Serviço' : 'Novo Serviço'}
-            </h2>
-            <p className="text-xs text-slate-500 mt-1">O prazo padrão é usado para calcular a data de entrega automaticamente.</p>
-          </div>
-          {idEdicao && (
-            <button onClick={limpar} className="text-xs text-red-500 hover:text-red-700 font-medium px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors">
-              ✕ Cancelar
-            </button>
-          )}
-        </div>
-
-        <form onSubmit={salvar} className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="md:col-span-1">
-            <label className={labelStyle}>Nome do serviço</label>
-            <input type="text" value={nome} onChange={e => setNome(e.target.value)} placeholder="Ex: Coroa de Zircônia" className={inputStyle} required />
-          </div>
-          <div>
-            <label className={labelStyle}>Prazo padrão (dias)</label>
-            <input type="number" min="1" value={prazo} onChange={e => setPrazo(e.target.value)} placeholder="7" className={inputStyle} required />
-          </div>
-          <div>
-            <label className={labelStyle}>Valor padrão (opcional)</label>
-            <input type="number" step="0.01" value={valor} onChange={e => setValor(e.target.value)} placeholder="0,00" className={inputStyle} />
-          </div>
-          <div className="md:col-span-3">
-            <button type="submit" disabled={salvando} className={`w-full md:w-auto px-6 py-2.5 rounded-lg text-sm font-medium text-white transition-colors shadow-sm ${idEdicao ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
-              {salvando ? 'Salvando...' : idEdicao ? 'Salvar Alterações' : '+ Adicionar Serviço'}
-            </button>
-          </div>
-        </form>
-      </div>
-
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-          <h3 className="font-semibold text-slate-800">Catálogo de Serviços</h3>
-          <span className="text-xs font-medium bg-slate-200 text-slate-600 px-2 py-1 rounded-full">{servicos.length}</span>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-slate-800">Catálogo de Serviços</h3>
+            <span className="text-xs font-medium bg-slate-200 text-slate-600 px-2 py-1 rounded-full">{servicos.length}</span>
+          </div>
+          <button
+            onClick={abrirNovoServico}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+            Novo Serviço
+          </button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
@@ -159,7 +145,7 @@ export function ListaServicos() {
             </thead>
             <tbody>
               {servicos.map(s => (
-                <tr key={s.id} className={`border-b border-slate-100 ${idEdicao === s.id ? 'bg-amber-50' : 'hover:bg-slate-50'}`}>
+                <tr key={s.id} className="border-b border-slate-100 hover:bg-slate-50">
                   <td className="px-6 py-4 font-semibold text-slate-900">{s.nome}</td>
                   <td className="px-6 py-4 text-slate-600">{s.prazoPadraoDias} {s.prazoPadraoDias === 1 ? 'dia' : 'dias'}</td>
                   <td className="px-6 py-4 text-slate-600">{s.valorPadrao ? s.valorPadrao.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—'}</td>
@@ -182,6 +168,54 @@ export function ListaServicos() {
           </table>
         </div>
       </div>
+
+      {/* MODAL: Novo / Editar Serviço */}
+      {modalAberto && createPortal(
+        <div className="fixed inset-0 z-[9999] overflow-y-auto">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={fecharModal} />
+          <div className="flex min-h-full items-center justify-center p-4">
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
+              <button
+                onClick={fecharModal}
+                className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+
+              <div className="mb-5">
+                <h2 className={`text-lg font-semibold ${idEdicao ? 'text-amber-700' : 'text-slate-900'}`}>
+                  {idEdicao ? '✏️ Editar Serviço' : 'Novo Serviço'}
+                </h2>
+                <p className="text-xs text-slate-500 mt-1">O prazo padrão é usado para calcular a data de entrega automaticamente.</p>
+              </div>
+
+              <form onSubmit={salvar} className="space-y-4">
+                <div>
+                  <label className={labelStyle}>Nome do serviço</label>
+                  <input type="text" value={nome} onChange={e => setNome(e.target.value)} placeholder="Ex: Coroa de Zircônia" className={inputStyle} required autoFocus />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className={labelStyle}>Prazo padrão (dias)</label>
+                    <input type="number" min="1" value={prazo} onChange={e => setPrazo(e.target.value)} placeholder="7" className={inputStyle} required />
+                  </div>
+                  <div>
+                    <label className={labelStyle}>Valor padrão (opcional)</label>
+                    <input type="number" step="0.01" value={valor} onChange={e => setValor(e.target.value)} placeholder="0,00" className={inputStyle} />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-3 pt-2">
+                  <button type="button" onClick={fecharModal} className="px-4 py-2.5 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">Cancelar</button>
+                  <button type="submit" disabled={salvando} className={`px-6 py-2.5 rounded-lg text-sm font-medium text-white transition-colors shadow-sm ${idEdicao ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                    {salvando ? 'Salvando...' : idEdicao ? 'Salvar Alterações' : '+ Adicionar Serviço'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

@@ -10,11 +10,15 @@ O **LabManager** é um sistema web desenvolvido para modernizar e organizar a ge
 
 | Tela de Pedidos | Tela de Login |
 |:-------------------:|:-----------------:|
-| ![Pedidos](./src/assets/screenshots/Pedidos.jpeg) | ![Login](./src/assets/screenshots/Login.jpeg) |
+| ![Pedidos](./src/assets/screenshots/Pedidos.png) | ![Login](./src/assets/screenshots/Login.png) |
 
 | Cadastro de Dentistas | Histórico |
 |:---------------------:|:------------------:|
-| ![Dentistas](./src/assets/screenshots/Dentistas.jpeg) | ![Histórico](./src/assets/screenshots/Históricos.jpeg) |
+| ![Dentistas](./src/assets/screenshots/Dentistas.png) | ![Histórico](./src/assets/screenshots/Históricos.png) |
+
+| Serviços | Histórico |
+|:---------------------:|:------------------:|
+| ![Serviços](./src/assets/screenshots/Serviços.png) | ![Relatórios](./src/assets/screenshots/Relatório.png) |
 
 ---
 

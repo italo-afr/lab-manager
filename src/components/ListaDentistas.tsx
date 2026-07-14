@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { db } from '../services/firebase';
 import { collection, addDoc, query, onSnapshot, orderBy, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 
@@ -13,7 +14,8 @@ interface Dentista {
 
 export function ListaDentistas() {
   const [dentistas, setDentistas] = useState<Dentista[]>([]);
-  
+  const [modalAberto, setModalAberto] = useState(false);
+
   // Estados do Formulário
   const [novoNome, setNovoNome] = useState('');
   const [novoTelefone, setNovoTelefone] = useState('');
@@ -45,6 +47,11 @@ export function ListaDentistas() {
     setIdEdicao(null);
   }
 
+  function abrirNovoCadastro() {
+    limparFormulario();
+    setModalAberto(true);
+  }
+
   function iniciarEdicao(dentista: Dentista) {
     setNovoNome(dentista.nome);
     setNovoTelefone(dentista.telefone);
@@ -52,26 +59,22 @@ export function ListaDentistas() {
     setNovoEndereco(dentista.endereco || '');
     setNovaCidade(dentista.cidade || '');
     setIdEdicao(dentista.id);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setModalAberto(true);
   }
 
-  // --- NOVA FUNÇÃO DE MÁSCARA ---
+  function fecharModal() {
+    setModalAberto(false);
+    limparFormulario();
+  }
+
   const handleTelefoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let valor = e.target.value;
-
-    // Remove tudo que não é número (Letras, símbolos)
     valor = valor.replace(/\D/g, "");
-
     if (valor.length > 11) {
         valor = valor.slice(0, 11);
     }
-
-    // Aplica a formatação
-    // Coloca parênteses em volta dos dois primeiros dígitos
     valor = valor.replace(/^(\d{2})(\d)/g, "($1) $2");
-    // Coloca hífen entre o quinto e o sexto dígito
     valor = valor.replace(/(\d)(\d{4})$/, "$1-$2");
-
     setNovoTelefone(valor);
   };
 
@@ -92,15 +95,13 @@ export function ListaDentistas() {
 
       if (idEdicao) {
         await updateDoc(doc(db, "dentistas", idEdicao), dados);
-        alert("✅ Dados do dentista atualizados!");
       } else {
         await addDoc(collection(db, "dentistas"), {
             ...dados,
             data_cadastro: new Date().toISOString()
         });
-        alert("✅ Dentista cadastrado com sucesso!");
       }
-      limparFormulario();
+      fecharModal();
     } catch (error) {
       console.error(error);
       alert("Erro ao salvar dados.");
@@ -120,80 +121,22 @@ export function ListaDentistas() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 animate-fade-in">
-      
-      <div className={`p-6 rounded-xl border shadow-sm transition-colors duration-300 ${idEdicao ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}>
-        <div className="flex justify-between items-start mb-6">
-            <div>
-                <h2 className={`text-lg font-semibold ${idEdicao ? 'text-amber-700' : 'text-slate-900'}`}>
-                    {idEdicao ? '✏️ Editar Parceiro' : 'Novo Parceiro'}
-                </h2>
-                <p className="text-xs text-slate-500 mt-1">
-                    {idEdicao ? 'Altere os dados abaixo e salve.' : 'Preencha os dados completos para contato e entrega.'}
-                </p>
-            </div>
-            {idEdicao && (
-                <button 
-                    onClick={limparFormulario}
-                    className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 font-medium px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors"
-                >
-                    ✕ Cancelar Edição
-                </button>
-            )}
-        </div>
-        
-        <form onSubmit={salvarDentista}>
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-                
-                <div className="md:col-span-8">
-                    <label className={labelStyle}>Nome do Dentista</label>
-                    <input type="text" value={novoNome} onChange={e => setNovoNome(e.target.value)} placeholder="Ex: Dr. Carlos Silva" className={inputStyle} required />
-                </div>
-                
-                {/* CAMPO TELEFONE ATUALIZADO */}
-                <div className="md:col-span-4">
-                    <label className={labelStyle}>Telefone / WhatsApp</label>
-                    <input 
-                        type="tel" // Ajuda no teclado do celular
-                        value={novoTelefone} 
-                        onChange={handleTelefoneChange} // Usa a máscara
-                        placeholder="(00) 00000-0000" 
-                        className={inputStyle} 
-                        maxLength={15} // Segurança extra visual
-                    />
-                </div>
-
-                <div className="md:col-span-8">
-                    <label className={labelStyle}>E-mail (Opcional)</label>
-                    <input type="email" value={novoEmail} onChange={e => setNovoEmail(e.target.value)} placeholder="doutor@clinica.com" className={inputStyle} />
-                </div>
-                <div className="md:col-span-4">
-                    <label className={labelStyle}>Cidade</label>
-                    <input type="text" value={novaCidade} onChange={e => setNovaCidade(e.target.value)} placeholder="Ex: São Paulo" className={inputStyle} />
-                </div>
-
-                <div className="md:col-span-12">
-                    <label className={labelStyle}>Endereço (Rua, Número, Bairro)</label>
-                    <input type="text" value={novoEndereco} onChange={e => setNovoEndereco(e.target.value)} placeholder="Rua das Flores, 123 - Centro" className={inputStyle} />
-                </div>
-            </div>
-
-            <div className="mt-6 flex justify-end gap-3">
-                {idEdicao && (
-                    <button type="button" onClick={limparFormulario} className="px-4 py-2.5 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">Cancelar</button>
-                )}
-                <button type="submit" disabled={carregando} className={`text-white font-medium rounded-lg text-sm px-6 py-2.5 transition-colors shadow-sm hover:shadow ${idEdicao ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
-                    {carregando ? 'Processando...' : idEdicao ? 'Salvar Alterações' : 'Adicionar Dentista'}
-                </button>
-            </div>
-        </form>
-      </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-            <h3 className="font-semibold text-slate-800">Parceiros Cadastrados</h3>
-            <span className="text-xs font-medium bg-slate-200 text-slate-600 px-2 py-1 rounded-full">{dentistas.length}</span>
+            <div className="flex items-center gap-2">
+                <h3 className="font-semibold text-slate-800">Parceiros Cadastrados</h3>
+                <span className="text-xs font-medium bg-slate-200 text-slate-600 px-2 py-1 rounded-full">{dentistas.length}</span>
+            </div>
+            <button
+                onClick={abrirNovoCadastro}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-colors"
+            >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                Novo Parceiro
+            </button>
         </div>
-        
+
         <div className="overflow-x-auto">
             <table className="w-full text-sm text-left text-slate-500">
                 <thead className="text-xs text-slate-700 uppercase bg-slate-50 border-b border-slate-200">
@@ -206,7 +149,7 @@ export function ListaDentistas() {
                 </thead>
                 <tbody>
                     {dentistas.map((dentista) => (
-                        <tr key={dentista.id} className={`border-b border-slate-100 transition-colors ${idEdicao === dentista.id ? 'bg-amber-50' : 'bg-white hover:bg-slate-50'}`}>
+                        <tr key={dentista.id} className="border-b border-slate-100 transition-colors bg-white hover:bg-slate-50">
                             <td className="px-6 py-4">
                                 <p className="font-bold text-slate-900">{dentista.nome}</p>
                             </td>
@@ -247,6 +190,76 @@ export function ListaDentistas() {
             </table>
         </div>
       </div>
+
+      {/* MODAL: Novo / Editar Parceiro */}
+      {modalAberto && createPortal(
+        <div className="fixed inset-0 z-[9999] overflow-y-auto">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={fecharModal} />
+          <div className="flex min-h-full items-center justify-center p-4">
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
+              <button
+                onClick={fecharModal}
+                className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+
+              <div className="mb-6">
+                  <h2 className={`text-lg font-semibold ${idEdicao ? 'text-amber-700' : 'text-slate-900'}`}>
+                      {idEdicao ? '✏️ Editar Parceiro' : 'Novo Parceiro'}
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">
+                      {idEdicao ? 'Altere os dados abaixo e salve.' : 'Preencha os dados completos para contato e entrega.'}
+                  </p>
+              </div>
+
+              <form onSubmit={salvarDentista}>
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+
+                      <div className="md:col-span-8">
+                          <label className={labelStyle}>Nome do Dentista</label>
+                          <input type="text" value={novoNome} onChange={e => setNovoNome(e.target.value)} placeholder="Ex: Dr. Carlos Silva" className={inputStyle} required autoFocus />
+                      </div>
+
+                      <div className="md:col-span-4">
+                          <label className={labelStyle}>Telefone / WhatsApp</label>
+                          <input
+                              type="tel"
+                              value={novoTelefone}
+                              onChange={handleTelefoneChange}
+                              placeholder="(00) 00000-0000"
+                              className={inputStyle}
+                              maxLength={15}
+                          />
+                      </div>
+
+                      <div className="md:col-span-8">
+                          <label className={labelStyle}>E-mail (Opcional)</label>
+                          <input type="email" value={novoEmail} onChange={e => setNovoEmail(e.target.value)} placeholder="doutor@clinica.com" className={inputStyle} />
+                      </div>
+                      <div className="md:col-span-4">
+                          <label className={labelStyle}>Cidade</label>
+                          <input type="text" value={novaCidade} onChange={e => setNovaCidade(e.target.value)} placeholder="Ex: São Paulo" className={inputStyle} />
+                      </div>
+
+                      <div className="md:col-span-12">
+                          <label className={labelStyle}>Endereço (Rua, Número, Bairro)</label>
+                          <input type="text" value={novoEndereco} onChange={e => setNovoEndereco(e.target.value)} placeholder="Rua das Flores, 123 - Centro" className={inputStyle} />
+                      </div>
+                  </div>
+
+                  <div className="mt-6 flex justify-end gap-3">
+                      <button type="button" onClick={fecharModal} className="px-4 py-2.5 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">Cancelar</button>
+                      <button type="submit" disabled={carregando} className={`text-white font-medium rounded-lg text-sm px-6 py-2.5 transition-colors shadow-sm hover:shadow ${idEdicao ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                          {carregando ? 'Processando...' : idEdicao ? 'Salvar Alterações' : 'Adicionar Dentista'}
+                      </button>
+                  </div>
+              </form>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

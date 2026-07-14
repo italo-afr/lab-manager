@@ -62,10 +62,10 @@ export function PaginaRelatorios() {
 
   const { inicio, fim } = calcularIntervalo();
 
-  // Filtra pela data de ENTRADA do pedido (quando o trabalho foi recebido no laboratório)
-  // -- é a métrica mais fiel para "quanto trabalho entrou nesse período"
+  // Filtra pela data de ENTREGA prevista do pedido — é o campo sempre preenchido em todo
+  // pedido (a data de entrada pode estar ausente em registros mais antigos).
   const ordensNoPeriodo = ordens.filter(o => {
-    const dataRef = (o.data_entrada || '').split('T')[0];
+    const dataRef = (o.data_entrega_prevista || '').split('T')[0];
     if (!dataRef || !inicio || !fim) return false;
     return dataRef >= inicio && dataRef <= fim;
   });
