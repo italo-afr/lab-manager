@@ -16,7 +16,7 @@ O **LabManager** é um sistema web desenvolvido para modernizar e organizar a ge
 |:---------------------:|:------------------:|
 | ![Dentistas](./src/assets/screenshots/Dentistas.png) | ![Histórico](./src/assets/screenshots/Históricos.png) |
 
-| Serviços | Histórico |
+| Serviços | Relatórios |
 |:---------------------:|:------------------:|
 | ![Serviços](./src/assets/screenshots/Serviços.png) | ![Relatórios](./src/assets/screenshots/Relatório.png) |
 
